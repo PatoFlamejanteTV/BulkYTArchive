@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk YouTube Video Archive Tester</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        .video-result {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .video-id {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .verdict {
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .archived {
+            color: green;
+        }
+        .not-archived {
+            color: red;
+        }
+        .archive-service {
+            margin-left: 20px;
+            padding: 5px 0;
+        }
+        .archive-service.available {
+            color: green;
+        }
+        .archive-service.unavailable {
+            color: #666;
+        }
+        .progress-container {
+            width: 100%;
+            background-color: #f1f1f1;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 20px;
+            background-color: #4CAF50;
+            width: 0%;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+        }
+        .status {
+            margin: 10px 0;
+            font-style: italic;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Bulk YouTube Video Archive Tester</h1>
+    <p>Check if YouTube videos are archived across various platforms. Paste video IDs or full YouTube URLs (one per line):</p>
+    
+    <textarea id="videoInput" placeholder="Paste video IDs or YouTube URLs here, one per line:
+    
+Example:
+dQw4w9WgXcQ
+https://www.youtube.com/watch?v=gqlTBca5Ym8
+https://youtu.be/JUV834Aeeow"></textarea>
+    
+    <div>
+        <button id="checkButton">Check Archive Status</button>
+        <button id="stopButton" disabled>Stop</button>
+        <span id="status" class="status">Ready</span>
+    </div>
+    
+    <div class="progress-container" id="progressContainer" style="display: none;">
+        <div class="progress-bar" id="progressBar">0%</div>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const videoInput = document.getElementById('videoInput');
+            const checkButton = document.getElementById('checkButton');
+            const stopButton = document.getElementById('stopButton');
+            const resultsDiv = document.getElementById('results');
+            const statusSpan = document.getElementById('status');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            
+            let isProcessing = false;
+            let stopRequested = false;
+            let totalVideos = 0;
+            let processedVideos = 0;
+            
+            // Extract video ID from various YouTube URL formats
+            function extractVideoId(urlOrId) {
+                // If it's already just an ID (11 characters)
+                if (/^[a-zA-Z0-9_-]{11}$/.test(urlOrId)) {
+                    return urlOrId;
+                }
+                
+                // Handle various YouTube URL formats
+                const patterns = [
+                    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i,
+                    /youtube\.com\/shorts\/([^"&?\/\s]{11})/i,
+                    /youtube\.com\/live\/([^"&?\/\s]{11})/i
+                ];
+                
+                for (const pattern of patterns) {
+                    const match = urlOrId.match(pattern);
+                    if (match && match[1]) {
+                        return match[1];
+                    }
+                }
+                
+                return null;
+            }
+            
+            // Process a single video ID
+            async function checkVideoArchiveStatus(videoId) {
+                try {
+                    const response = await fetch(`https://findyoutubevideo.thetechrobo.ca/api/v4/${videoId}`, {
+                        credentials: "omit",
+                        headers: {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 Firefox/141.0",
+                            "Accept": "*/*",
+                            "Accept-Language": "en-US,en;q=0.5",
+                            "Sec-GPC": "1",
+                            "Sec-Fetch-Dest": "empty",
+                            "Sec-Fetch-Mode": "cors",
+                            "Sec-Fetch-Site": "same-origin",
+                            "Priority": "u=4"
+                        },
+                        referrer: "https://findyoutubevideo.thetechrobo.ca/api",
+                        method: "GET",
+                        mode: "cors"
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    return await response.json();
+                } catch (error) {
+                    console.error(`Error checking video ${videoId}:`, error);
+                    return { error: error.message };
+                }
+            }
+            
+            // Create result element for a video
+            function createResultElement(videoId, data) {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'video-result';
+                
+                const videoIdElement = document.createElement('div');
+                videoIdElement.className = 'video-id';
+                videoIdElement.textContent = `Video ID: ${videoId}`;
+                if (data.error) {
+                    videoIdElement.textContent += ` - Error: ${data.error}`;
+                }
+                resultDiv.appendChild(videoIdElement);
+                
+                if (data.error) {
+                    const errorElement = document.createElement('div');
+                    errorElement.className = 'error';
+                    errorElement.textContent = `Error: ${data.error}`;
+                    resultDiv.appendChild(errorElement);
+                    return resultDiv;
+                }
+                
+                if (data.verdict) {
+                    const verdictElement = document.createElement('div');
+                    verdictElement.className = 'verdict ' + (data.verdict.video ? 'archived' : 'not-archived');
+                    verdictElement.textContent = `Verdict: ${data.verdict.human_friendly}`;
+                    resultDiv.appendChild(verdictElement);
+                }
+                
+                if (data.keys && data.keys.length > 0) {
+                    const servicesHeader = document.createElement('div');
+                    servicesHeader.textContent = 'Archive Services:';
+                    resultDiv.appendChild(servicesHeader);
+                    
+                    data.keys.forEach(service => {
+                        const serviceElement = document.createElement('div');
+                        serviceElement.className = `archive-service ${service.archived ? 'available' : 'unavailable'}`;
+                        
+                        let serviceText = `${service.name}: ${service.archived ? 'Archived' : 'Not archived'}`;
+                        if (service.archived && service.available) {
+                            serviceText += ` - ${service.available}`;
+                        }
+                        if (service.note) {
+                            serviceText += ` (${service.note})`;
+                        }
+                        
+                        serviceElement.textContent = serviceText;
+                        resultDiv.appendChild(serviceElement);
+                    });
+                }
+                
+                return resultDiv;
+            }
+            
+            // Process all videos
+            async function processVideos() {
+                const inputText = videoInput.value.trim();
+                if (!inputText) {
+                    statusSpan.textContent = 'Please enter video IDs or URLs';
+                    return;
+                }
+                
+                // Parse input
+                const lines = inputText.split('\n').filter(line => line.trim());
+                const videoIds = [];
+                
+                for (const line of lines) {
+                    const videoId = extractVideoId(line.trim());
+                    if (videoId) {
+                        videoIds.push(videoId);
+                    } else {
+                        console.warn(`Skipping invalid line: ${line}`);
+                    }
+                }
+                
+                if (videoIds.length === 0) {
+                    statusSpan.textContent = 'No valid video IDs found';
+                    return;
+                }
+                
+                // Setup UI for processing
+                isProcessing = true;
+                stopRequested = false;
+                totalVideos = videoIds.length;
+                processedVideos = 0;
+                
+                checkButton.disabled = true;
+                stopButton.disabled = false;
+                progressContainer.style.display = 'block';
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+                resultsDiv.innerHTML = '';
+                statusSpan.textContent = `Processing ${totalVideos} videos...`;
+                
+                // Process each video
+                for (const videoId of videoIds) {
+                    if (stopRequested) {
+                        statusSpan.textContent = `Processing stopped (${processedVideos}/${totalVideos} completed)`;
+                        break;
+                    }
+                    
+                    statusSpan.textContent = `Processing ${processedVideos + 1}/${totalVideos}: ${videoId}`;
+                    
+                    try {
+                        const data = await checkVideoArchiveStatus(videoId);
+                        const resultElement = createResultElement(videoId, data);
+                        resultsDiv.appendChild(resultElement);
+                        
+                        // Scroll to the bottom if there are many results
+                        if (processedVideos > 5) {
+                            resultElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    } catch (error) {
+                        console.error(`Error processing video ${videoId}:`, error);
+                        const errorElement = document.createElement('div');
+                        errorElement.className = 'video-result error';
+                        errorElement.textContent = `Error processing ${videoId}: ${error.message}`;
+                        resultsDiv.appendChild(errorElement);
+                    }
+                    
+                    processedVideos++;
+                    const progressPercent = Math.round((processedVideos / totalVideos) * 100);
+                    progressBar.style.width = `${progressPercent}%`;
+                    progressBar.textContent = `${progressPercent}%`;
+                }
+                
+                // Cleanup
+                isProcessing = false;
+                checkButton.disabled = false;
+                stopButton.disabled = true;
+                
+                if (!stopRequested) {
+                    statusSpan.textContent = `Completed ${processedVideos}/${totalVideos} videos`;
+                }
+            }
+            
+            // Event listeners
+            checkButton.addEventListener('click', processVideos);
+            stopButton.addEventListener('click', function() {
+                if (isProcessing) {
+                    stopRequested = true;
+                    statusSpan.textContent = `Stopping... (${processedVideos}/${totalVideos} completed)`;
+                }
+            });
+        });
+    </script>
+</body>
+</html>
